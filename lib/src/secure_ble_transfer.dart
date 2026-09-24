@@ -112,6 +112,12 @@ class SecureBleTransfer {
     }
   }
 
+  BlePeripheralState get senderState => _peripheral.state;
+  Stream<BlePeripheralState> get senderStates => _peripheral.states;
+
+  BleCentralState get receiverState => _central.state;
+  Stream<BleCentralState> get receiverStates => _central.states;
+
   /// Completa cuando el receptor confirma este mensaje mediante ACK.
   Future<void> sendText(
     String text, {
