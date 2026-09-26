@@ -83,6 +83,8 @@ class SecureBleTransfer {
 
   bool _sending = false;
 
+  bool _sendingReply = false;
+
   Stream<String> get receivedTexts => _receivedTexts();
 
   StreamSubscription<BleCentralState>? _receiverFlowSubscription;
@@ -117,6 +119,37 @@ class SecureBleTransfer {
 
   BleCentralState get receiverState => _central.state;
   Stream<BleCentralState> get receiverStates => _central.states;
+
+  /// Textos que B envía al teléfono A, creador del QR.
+  Stream<String> get receivedReplies => _peripheral.receivedTexts;
+
+  /// Indica si el teléfono A conectado permite envíos B → A.
+  bool get supportsReplies => _central.supportsReverseData;
+
+  /// Envía un texto desde B hacia A y espera su ACK.
+  Future<void> sendReply(
+    String text, {
+    Duration ackTimeout = const Duration(seconds: 5),
+  }) async {
+    if (_sendingReply) {
+      throw StateError('Ya hay una respuesta esperando ACK');
+    }
+
+    if (!supportsReplies) {
+      throw StateError('El emisor conectado no admite respuestas B → A');
+    }
+
+    _sendingReply = true;
+
+    try {
+      await _central.sendEncryptedData(
+        text,
+        ackTimeout: ackTimeout,
+      );
+    } finally {
+      _sendingReply = false;
+    }
+  }
 
   /// Completa cuando el receptor confirma este mensaje mediante ACK.
   Future<void> sendText(

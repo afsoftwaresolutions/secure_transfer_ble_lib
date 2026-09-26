@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart' as ble;
+import 'package:secure_transfer_poc_flutter/domain/entities/transfer_acknowledgement.dart';
 
 import '../../core/protocol/ir_transfer_protocol.dart';
 import '../../domain/entities/ble_peripheral_state.dart';
@@ -38,6 +39,7 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
        _acknowledgementCodec = acknowledgementCodec,
        _handshakeAssembler = BleMessageAssembler(codec: frameCodec),
        _ackAssembler = BleMessageAssembler(codec: frameCodec),
+       _reverseDataAssembler = BleMessageAssembler(codec: frameCodec),
        _uuid = uuid ?? Uuid() {
     if (Platform.isAndroid) {
       _connectionSubscription = _manager.connectionStateChanged.listen(
@@ -67,6 +69,9 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
   final StreamController<BlePeripheralState> _stateController =
       StreamController<BlePeripheralState>.broadcast();
 
+  final StreamController<String> _receivedTextsController =
+    StreamController<String>.broadcast();
+
   StreamSubscription<ble.CentralConnectionStateChangedEventArgs>?
   _connectionSubscription;
 
@@ -83,6 +88,12 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
   ble.GATTCharacteristic? _dataTransferCharacteristic;
 
   ble.GATTCharacteristic? _transferStatusCharacteristic;
+
+  ble.GATTCharacteristic? _reverseDataCharacteristic;
+
+  final BleMessageAssembler _reverseDataAssembler;
+  final Set<String> _processedReverseMessageIds = <String>{};
+  ble.Central? _verifiedCentral;
 
   bool _isAdvertising = false;
 
@@ -119,6 +130,8 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
 
   bool _dataNotificationsEnabled = false;
 
+  bool _reverseAckNotificationsEnabled = false;
+
   String? _awaitingMessageId;
 
   static const Duration _bluetoothReadyTimeout = Duration(seconds: 10);
@@ -128,6 +141,9 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
 
   @override
   Stream<BlePeripheralState> get states => _stateController.stream;
+
+  @override
+  Stream<String> get receivedTexts => _receivedTextsController.stream;
 
   Future<void> _waitUntilBluetoothIsReady() async {
     var currentState = _manager.state;
@@ -247,17 +263,26 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
       descriptors: const [],
     );
 
+    final reverseData = ble.GATTCharacteristic.mutable(
+      uuid: ble.UUID.fromString(IrTransferProtocol.reverseDataUuid),
+      properties: const [ble.GATTCharacteristicProperty.write],
+      permissions: const [ble.GATTCharacteristicPermission.write],
+      descriptors: const [],
+    );
+
     _sessionControlCharacteristic = sessionControl;
 
     _dataTransferCharacteristic = dataTransfer;
 
     _transferStatusCharacteristic = transferStatus;
 
+    _reverseDataCharacteristic = reverseData;
+
     return ble.GATTService(
       uuid: _serviceUuid,
       isPrimary: true,
       includedServices: const [],
-      characteristics: [sessionControl, dataTransfer, transferStatus],
+      characteristics: [sessionControl, dataTransfer, transferStatus, reverseData],
     );
   }
 
@@ -265,6 +290,10 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
     ble.CentralConnectionStateChangedEventArgs event,
   ) {
     if (event.state == ble.ConnectionState.connected) {
+
+      if (_verifiedCentral != null && event.central != _verifiedCentral) {
+        return;
+      }
       _connectedCentral = event.central;
 
       _emit(
@@ -280,26 +309,30 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
     }
 
     if (event.state == ble.ConnectionState.disconnected) {
-      if (_connectedCentral == event.central) {
-        _connectedCentral = null;
-        final hadPendingAck = _awaitingMessageId != null;
-        _awaitingMessageId = null;
-        _ackAssembler.clear();
-        _dataNotificationsEnabled = false;
-        _sessionWasVerified = false;
+      if (_connectedCentral != event.central) {
+        return;
+      }
 
-        if (hadPendingAck) {
-          _emitError('El receptor se desconectó antes de confirmar el mensaje');
-          return;
-        }
+      _connectedCentral = null;
+      final hadPendingAck = _awaitingMessageId != null;
+      _awaitingMessageId = null;
+      _ackAssembler.clear();
+      _dataNotificationsEnabled = false;
+      _reverseAckNotificationsEnabled = false;
+      _sessionWasVerified = false;
+      _verifiedCentral = null;
+      _reverseDataAssembler.clear();
+      _processedReverseMessageIds.clear();
+
+      if (hadPendingAck) {
+        _emitError('El receptor se desconectó antes de confirmar el mensaje');
+        return;
       }
 
       _emit(
         BlePeripheralState(
           status: BlePeripheralStatus.advertising,
-          message:
-              'Receptor desconectado; '
-              'esperando otro',
+          message: 'Receptor desconectado; esperando otro',
           sessionId: _activeSessionId,
         ),
       );
@@ -309,6 +342,17 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
   void _handleNotifyStateChanged(
     ble.GATTCharacteristicNotifyStateChangedEventArgs event,
   ) {
+
+    if (event.characteristic == _transferStatusCharacteristic) {
+      if (_connectedCentral != null && event.central != _connectedCentral) {
+        return;
+      }
+
+      _connectedCentral = event.central;
+      _reverseAckNotificationsEnabled = event.state;
+      return;
+    }
+
     if (event.characteristic != _dataTransferCharacteristic) {
       return;
     }
@@ -333,6 +377,14 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
     final characteristic = event.characteristic;
     final request = event.request;
 
+    if (_verifiedCentral != null && event.central != _verifiedCentral) {
+      await _manager.respondWriteRequestWithError(
+        request,
+        error: ble.GATTError.insufficientAuthorization,
+      );
+      return;
+    }
+
     _connectedCentral = event.central;
 
     if (request.offset != 0) {
@@ -350,6 +402,11 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
         ),
       );
 
+      return;
+    }
+
+    if (characteristic == _reverseDataCharacteristic) {
+      await _processReverseDataFrame(event);
       return;
     }
 
@@ -514,6 +571,8 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
       );
 
       _handshakeAssembler.clear();
+
+      _verifiedCentral = event.central;
 
       await _manager.respondWriteRequest(event.request);
 
@@ -805,6 +864,12 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
     _awaitingMessageId = null;
     _dataNotificationsEnabled = false;
 
+    _reverseAckNotificationsEnabled = false;
+
+    _verifiedCentral = null;
+    _reverseDataAssembler.clear();
+    _processedReverseMessageIds.clear();
+
     try {
       await _manager.removeAllServices();
     } on Object {
@@ -851,5 +916,158 @@ class FlutterBlePeripheralRepository implements BlePeripheralRepository {
     await _notifyStateSubscription.cancel();
 
     await _stateController.close();
+
+    await _receivedTextsController.close();
+
+  }
+
+  Future<void> _processReverseDataFrame(
+    ble.GATTCharacteristicWriteRequestedEventArgs event,
+  ) async {
+    final sessionId = _activeSessionId;
+
+    if (sessionId == null ||
+        event.central != _verifiedCentral ||
+        !_sessionKeyRepository.hasSessionKey(sessionId)) {
+      await _manager.respondWriteRequestWithError(
+        event.request,
+        error: ble.GATTError.insufficientAuthorization,
+      );
+      return;
+    }
+
+    var writeResponded = false;
+
+    try {
+      final assembled = _reverseDataAssembler.accept(event.request.value);
+
+      if (assembled == null) {
+        await _manager.respondWriteRequest(event.request);
+        return;
+      }
+
+      if (assembled.messageType != BleMessageType.encryptedData) {
+        throw const FormatException('Se esperaba un mensaje cifrado');
+      }
+
+      final envelopeJson = utf8.decode(
+        assembled.payload,
+        allowMalformed: false,
+      );
+      final envelope = _envelopeCodec.decode(envelopeJson);
+
+      if (envelope.sessionId != sessionId) {
+        throw const FormatException('El mensaje pertenece a otra sesión');
+      }
+
+      final text = await _sessionKeyRepository.decryptSessionMessage(
+        envelope,
+        purpose: SessionMessagePurpose.reverseData,
+      );
+
+      final messageKey = '$sessionId|${envelope.messageId}';
+      final isNew = !_processedReverseMessageIds.contains(messageKey);
+
+      _reverseDataAssembler.clear();
+      await _manager.respondWriteRequest(event.request);
+      writeResponded = true;
+
+      if (isNew) {
+        _processedReverseMessageIds.add(messageKey);
+
+        if (!_receivedTextsController.isClosed) {
+          _receivedTextsController.add(text);
+        }
+      }
+
+      unawaited(
+        _sendReverseAck(
+          sessionId: sessionId,
+          messageId: envelope.messageId,
+          duplicate: !isNew,
+        ),
+      );
+
+    } on Object {
+      _reverseDataAssembler.clear();
+
+      if (!writeResponded) {
+        try {
+          await _manager.respondWriteRequestWithError(
+            event.request,
+            error: ble.GATTError.invalidPDU,
+          );
+        } on Object {
+          // La conexión pudo cerrarse mientras se respondía la escritura.
+        }
+      }
+    }
+  }
+
+  Future<void> _sendReverseAck({
+    required String sessionId,
+    required String messageId,
+    required bool duplicate,
+  }) async {
+    try {
+      final central = _verifiedCentral;
+      final transferStatus = _transferStatusCharacteristic;
+
+      if (central == null ||
+          transferStatus == null ||
+          !_reverseAckNotificationsEnabled ||
+          _activeSessionId != sessionId) {
+        throw StateError('El receptor no está listo para recibir el ACK');
+      }
+
+      final acknowledgement = TransferAcknowledgement(
+        protocolVersion: 1,
+        sessionId: sessionId,
+        acknowledgedMessageId: messageId,
+        duplicate: duplicate,
+      );
+
+      final acknowledgementJson =
+          _acknowledgementCodec.encode(acknowledgement);
+
+      final envelope = await _sessionKeyRepository.encryptSessionMessage(
+        sessionId: sessionId,
+        messageId: _uuid.v4(),
+        plainText: acknowledgementJson,
+        purpose: SessionMessagePurpose.reverseAck,
+      );
+
+      final frames = _frameCodec.fragment(
+        messageType: BleMessageType.ack,
+        payload: utf8.encode(_envelopeCodec.encode(envelope)),
+        negotiatedMtu: await _manager.getMaximumNotifyLength(central) + 3,
+      );
+
+      for (final frame in frames) {
+        if (_activeSessionId != sessionId || _verifiedCentral != central) {
+          return;
+        }
+
+        await _manager.notifyCharacteristic(
+          central,
+          transferStatus,
+          value: Uint8List.fromList(frame),
+        );
+      }
+    } on Object catch (error) {
+      // La escritura del texto ya fue respondida. B podrá reintentar
+      // y recibirá un nuevo ACK sin volver a entregar el texto a la app.
+      final current = _state;
+      _emit(
+        BlePeripheralState(
+          status: current.status,
+          message: 'No fue posible confirmar el texto recibido: $error',
+          sessionId: current.sessionId,
+          centralId: current.centralId,
+          sessionKeyFingerprint: current.sessionKeyFingerprint,
+          messageId: current.messageId,
+        ),
+      );
+    }
   }
 }

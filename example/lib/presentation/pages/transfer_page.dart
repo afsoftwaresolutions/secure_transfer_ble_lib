@@ -122,6 +122,17 @@ class TransferPage extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (store.activeRole == TransferRole.receiver) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.tonalIcon(
+                      onPressed: store.canSendReply ? store.sendReply : null,
+                      icon: const Icon(Icons.reply),
+                      label: const Text('Responder al creador del QR'),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 if (store.scannedSessionId case final scannedSessionId?) ...[
                   const SizedBox(height: 20),

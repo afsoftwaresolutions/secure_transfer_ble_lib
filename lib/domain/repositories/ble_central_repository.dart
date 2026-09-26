@@ -5,6 +5,8 @@ abstract interface class BleCentralRepository {
 
   Stream<BleCentralState> get states;
 
+  bool get supportsReverseData;
+
   Future<void> scanAndConnect();
 
   Future<void> confirmSession(String sessionId);
@@ -12,6 +14,11 @@ abstract interface class BleCentralRepository {
   Future<void> sendReceiverHandshake({
     required String handshakeJson,
     required String sessionKeyFingerprint,
+  });
+
+  Future<void> sendEncryptedData(
+    String plainText, {
+    Duration ackTimeout = const Duration(seconds: 5),
   });
 
   Future<void> disconnect();

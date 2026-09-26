@@ -114,6 +114,7 @@ class PointyCastleSessionKeyRepository implements SessionKeyRepository {
     required String sessionId,
     required String messageId,
     required String plainText,
+    SessionMessagePurpose purpose = SessionMessagePurpose.legacy,
   }) async {
     if (sessionId.trim().isEmpty) {
       throw ArgumentError('El sessionId está vacío');
@@ -144,6 +145,7 @@ class PointyCastleSessionKeyRepository implements SessionKeyRepository {
       final associatedData = _createAssociatedData(
         sessionId: sessionId,
         messageId: messageId,
+        purpose: purpose
       );
 
       final encryptedBytes = _processAesGcm(
@@ -168,8 +170,9 @@ class PointyCastleSessionKeyRepository implements SessionKeyRepository {
 
   @override
   Future<String> decryptSessionMessage(
-    EncryptedTransferEnvelope envelope,
-  ) async {
+    EncryptedTransferEnvelope envelope, {
+    SessionMessagePurpose purpose = SessionMessagePurpose.legacy,
+  }) async {
     if (envelope.protocolVersion != _protocolVersion) {
       throw FormatException(
         'Versión de protocolo no soportada: '
@@ -212,6 +215,7 @@ class PointyCastleSessionKeyRepository implements SessionKeyRepository {
       final associatedData = _createAssociatedData(
         sessionId: envelope.sessionId,
         messageId: envelope.messageId,
+        purpose: purpose
       );
 
       final decryptedBytes = _processAesGcm(
@@ -383,14 +387,17 @@ class PointyCastleSessionKeyRepository implements SessionKeyRepository {
   Uint8List _createAssociatedData({
     required String sessionId,
     required String messageId,
+    required SessionMessagePurpose purpose,
   }) {
-    return Uint8List.fromList(
-      utf8.encode(
-        'IR_TRANSFER_V1|'
-        '$sessionId|'
-        '$messageId',
-      ),
-    );
+    final base = 'IR_TRANSFER_V1|$sessionId|$messageId';
+
+    final value = switch (purpose) {
+      SessionMessagePurpose.legacy => base,
+      SessionMessagePurpose.reverseData => '$base|REVERSE_DATA',
+      SessionMessagePurpose.reverseAck => '$base|REVERSE_ACK',
+    };
+
+    return Uint8List.fromList(utf8.encode(value));
   }
 
   Uint8List _processAesGcm({

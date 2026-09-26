@@ -41,9 +41,7 @@ dependencies:
   mobx: ^2.7.0
 
   secure_transfer_poc_flutter:
-    git:
-      url: https://github.com/afsoftwaresolutions/secure_transfer_ble_lib.git
-      ref: main
+    path: ..
 
 dev_dependencies:
   flutter_test:

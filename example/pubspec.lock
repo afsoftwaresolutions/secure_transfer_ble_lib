@@ -531,11 +531,9 @@ packages:
   secure_transfer_poc_flutter:
     dependency: "direct main"
     description:
-      path: "."
-      ref: main
-      resolved-ref: "6fed16690db6405bf9133f9ccf52c26dc0045614"
-      url: "https://github.com/afsoftwaresolutions/secure_transfer_ble_lib.git"
-    source: git
+      path: ".."
+      relative: true
+    source: path
     version: "1.0.0+1"
   sky_engine:
     dependency: transitive

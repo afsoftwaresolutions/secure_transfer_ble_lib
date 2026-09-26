@@ -12,4 +12,6 @@ abstract interface class BlePeripheralRepository {
   Future<void> stopAdvertising();
 
   Future<void> dispose();
+
+  Stream<String> get receivedTexts;
 }

@@ -15,6 +15,7 @@ enum BleCentralStatus {
   dataReceived,
   ackSending,
   ackSent,
+  reverseAckReceived,
   sessionRejected,
   disconnected,
   error,

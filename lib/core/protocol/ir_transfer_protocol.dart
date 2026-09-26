@@ -30,6 +30,9 @@ abstract final class IrTransferProtocol {
   static const String transferStatusUuid =
       '7d2ea28d-f7bd-485a-bd9d-92ad6ecfe93e';
 
+  static const String reverseDataUuid =
+    '7d2ea28e-f7bd-485a-bd9d-92ad6ecfe93e';
+
   // Descriptor estándar para habilitar notificaciones BLE.
   static const String clientConfigurationUuid =
       '00002902-0000-1000-8000-00805f9b34fb';

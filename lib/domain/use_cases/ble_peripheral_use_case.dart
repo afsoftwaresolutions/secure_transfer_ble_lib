@@ -10,6 +10,8 @@ class BlePeripheralUseCase {
 
   Stream<BlePeripheralState> get states => _repository.states;
 
+  Stream<String> get receivedTexts => _repository.receivedTexts;
+
   Future<void> startAdvertising(String sessionId) {
     return _repository.startAdvertising(sessionId);
   }

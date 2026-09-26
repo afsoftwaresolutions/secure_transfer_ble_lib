@@ -52,6 +52,12 @@ abstract class TransferStoreBase with Store {
     _receivedTextSubscription = _secureBleTransfer.receivedTexts.listen((text) {
       receivedData = text;
     });
+
+    _receivedReplySubscription =
+        _secureBleTransfer.receivedReplies.listen((text) {
+      receivedData = text;
+    });
+
   }
 
   final CreateSignedInvitationUseCase _createSignedInvitationUseCase;
@@ -73,6 +79,8 @@ abstract class TransferStoreBase with Store {
   late final StreamSubscription<BleCentralState> _bleStateSubscription;
 
   late final StreamSubscription<String> _receivedTextSubscription;
+
+  late final StreamSubscription<String> _receivedReplySubscription;
 
   bool _sendAutomaticallyWhenReady = false;
 
@@ -222,6 +230,19 @@ abstract class TransferStoreBase with Store {
 
     return blePeripheralStatus == BlePeripheralStatus.sessionKeyReady ||
         blePeripheralStatus == BlePeripheralStatus.dataConfirmed;
+  }
+
+  bool get canSendReply {
+    if (activeRole != TransferRole.receiver ||
+        isLoading ||
+        outgoingPlainText.trim().isEmpty ||
+        !_secureBleTransfer.supportsReplies) {
+      return false;
+    }
+
+    return bleCentralStatus == BleCentralStatus.sessionKeyReady ||
+        bleCentralStatus == BleCentralStatus.ackSent ||
+        bleCentralStatus == BleCentralStatus.reverseAckReceived;
   }
 
   @computed
@@ -518,7 +539,9 @@ abstract class TransferStoreBase with Store {
     bleRssi = state.rssi;
     negotiatedMtu = state.negotiatedMtu;
 
-    receivedMessageId = state.receivedMessageId ?? receivedMessageId;
+    if (state.status == BleCentralStatus.dataReceived) {
+      receivedMessageId = state.receivedMessageId ?? receivedMessageId;
+    }
 
     if (!_automaticReceiveFlow) {
       return;
@@ -607,6 +630,24 @@ abstract class TransferStoreBase with Store {
     }
   }
 
+  Future<void> sendReply() async {
+    if (!canSendReply) return;
+
+    errorMessage = null;
+    isLoading = true;
+    message = 'Enviando respuesta al creador del QR...';
+
+    try {
+      await _secureBleTransfer.sendReply(outgoingPlainText);
+      message = 'Respuesta confirmada por el creador del QR';
+    } on Object catch (error) {
+      errorMessage = 'No se confirmó la respuesta: $error';
+      message = 'No fue posible enviar la respuesta';
+    } finally {
+      isLoading = false;
+    }
+  }
+
   @action
   Future<void> closeSendFlow() async {
 
@@ -673,5 +714,6 @@ abstract class TransferStoreBase with Store {
     unawaited(_bleStateSubscription.cancel());
     unawaited(_blePeripheralSubscription.cancel());
     unawaited(_receivedTextSubscription.cancel());
+    unawaited(_receivedReplySubscription.cancel());
   }
 }

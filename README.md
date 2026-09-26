@@ -11,10 +11,10 @@ dependencies:
   secure_transfer_poc_flutter:
     git:
       url: https://github.com/afsoftwaresolutions/secure_transfer_ble_lib.git
-      ref: master
+      ref: main
 ```
 
-Usa la misma versión del paquete en ambos dispositivos. Para una integración estable, fija `ref` a un tag o commit en vez de `master`.
+Usa la misma versión del paquete en ambos dispositivos. Para una integración estable, fija `ref` a un tag o commit en vez de `main`.
 
 ## Crear la instancia
 
@@ -74,6 +74,48 @@ await transfer.stopReceiving();
 await messagesSubscription.cancel();
 ```
 
+## Responder durante la misma conexión
+
+El teléfono A crea el QR y envía con `sendText()`. También puede recibir
+textos de B: escucha `receivedReplies` antes de iniciar la sesión.
+
+```dart
+final repliesSubscription = transfer.receivedReplies.listen((text) {
+  // Texto enviado por B al creador del QR.
+});
+
+final invitation = await transfer.startSending();
+// Muestra invitation.invitationJson como QR.
+```
+
+El teléfono B escanea el QR y se conecta con `prepareReceiving()` y
+`connectReceiver()`. Cuando el handshake haya terminado, puede responder
+sin escanear de nuevo:
+
+```dart
+if (transfer.supportsReplies) {
+  await transfer.sendReply('{"respuesta":"RECIBIDO"}');
+}
+```
+
+Observa `receiverStates`: la sesión está lista al llegar a
+`BleCentralStatus.sessionKeyReady`. `supportsReplies` indica que el
+dispositivo A ofrece el canal de regreso; por sí solo no indica que el
+handshake haya terminado. `sendReply()` termina cuando A confirma el
+mensaje mediante un ACK.
+
+Al finalizar en A:
+
+```dart
+await transfer.stopSending();
+await repliesSubscription.cancel();
+```
+
+Un timeout significa que B no recibió confirmación: A podría haber
+recibido el texto aunque se perdiera el ACK. Si el texto representa una
+operación de negocio, incluye un identificador propio para evitar
+procesarla dos veces al iniciar un envío nuevo.
+
 ## Consultar estados
 
 `senderState` y `receiverState` devuelven una fotografía del estado actual. `senderStates` y `receiverStates` emiten los cambios:
@@ -102,3 +144,8 @@ La app que integra el paquete debe declarar los permisos BLE en su `AndroidManif
 La demo se ha probado en Android con envíos consecutivos sin volver a escanear el QR, incluso entre la versión Flutter y el POC Android Kotlin usando el identificador predeterminado. El flujo iOS requiere pruebas en un dispositivo Apple.
 
 `appId` comprueba que ambos extremos declaren el mismo tipo de app dentro del protocolo; por sí solo no certifica la identidad de una instalación. Si la versión Kotlin va a usar `INTERAPP` o `APP_CONTROLLER`, debe configurarse con el mismo identificador.
+
+La comunicación B → A se probó entre dos teléfonos Android con esta
+versión Flutter de la librería, manteniendo la misma conexión BLE.
+Un emisor Kotlin anterior no anuncia el canal de regreso:
+`supportsReplies` será `false`, mientras que A → B sigue disponible.

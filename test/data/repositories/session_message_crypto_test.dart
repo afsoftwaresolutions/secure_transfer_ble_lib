@@ -8,6 +8,7 @@ import 'package:secure_transfer_poc_flutter/data/repositories/pointy_castle_devi
 import 'package:secure_transfer_poc_flutter/data/repositories/pointy_castle_session_invitation_repository.dart';
 import 'package:secure_transfer_poc_flutter/data/repositories/pointy_castle_session_key_repository.dart';
 import 'package:secure_transfer_poc_flutter/domain/entities/encrypted_transfer_envelope.dart';
+import 'package:secure_transfer_poc_flutter/domain/repositories/session_key_repository.dart';
 
 void main() {
   test('cifra y descifra un mensaje con AES-GCM', () async {
@@ -56,6 +57,54 @@ void main() {
     );
 
     expect(decryptedText, originalText);
+
+    final reverseEnvelope = await sessionKeyRepository.encryptSessionMessage(
+      sessionId: invitation.sessionId,
+      messageId: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
+      plainText: originalText,
+      purpose: SessionMessagePurpose.reverseData,
+    );
+
+    expect(
+      await sessionKeyRepository.decryptSessionMessage(
+        reverseEnvelope,
+        purpose: SessionMessagePurpose.reverseData,
+      ),
+      originalText,
+    );
+
+    expect(
+      sessionKeyRepository.decryptSessionMessage(
+        reverseEnvelope,
+        purpose: SessionMessagePurpose.legacy,
+      ),
+      throwsA(anything),
+    );
+
+    final reverseAckEnvelope =
+        await sessionKeyRepository.encryptSessionMessage(
+      sessionId: invitation.sessionId,
+      messageId: 'cccccccc-dddd-eeee-ffff-000000000000',
+      plainText: '{"ack":"ok"}',
+      purpose: SessionMessagePurpose.reverseAck,
+    );
+
+    expect(
+      await sessionKeyRepository.decryptSessionMessage(
+        reverseAckEnvelope,
+        purpose: SessionMessagePurpose.reverseAck,
+      ),
+      '{"ack":"ok"}',
+    );
+
+    expect(
+      sessionKeyRepository.decryptSessionMessage(
+        reverseAckEnvelope,
+        purpose: SessionMessagePurpose.reverseData,
+      ),
+      throwsA(anything),
+    );
+
   });
 
   test('AES-GCM rechaza un ciphertext modificado', () async {

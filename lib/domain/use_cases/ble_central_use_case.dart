@@ -10,6 +10,8 @@ class BleCentralUseCase {
 
   Stream<BleCentralState> get states => _repository.states;
 
+  bool get supportsReverseData => _repository.supportsReverseData;
+
   Future<void> scanAndConnect() {
     return _repository.scanAndConnect();
   }
@@ -25,6 +27,16 @@ class BleCentralUseCase {
     return _repository.sendReceiverHandshake(
       handshakeJson: handshakeJson,
       sessionKeyFingerprint: sessionKeyFingerprint,
+    );
+  }
+
+  Future<void> sendEncryptedData(
+    String plainText, {
+    Duration ackTimeout = const Duration(seconds: 5),
+  }) {
+    return _repository.sendEncryptedData(
+      plainText,
+      ackTimeout: ackTimeout,
     );
   }
 
