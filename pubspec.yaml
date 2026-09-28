@@ -30,11 +30,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  get_it: ^9.2.1
+  get_it: ^7.6.7
   bluetooth_low_energy: ^6.2.1
-  flutter_secure_storage: ^11.2.0
-  uuid: ^4.6.0
-  pointycastle: ^4.0.0
+  flutter_secure_storage: ^10.0.0
+  uuid: ^4.0.0
+  pointycastle: ^3.6.2
 
 dev_dependencies:
   flutter_test:
